@@ -80,7 +80,6 @@ class IOStream(InputStream, OutputStream, Protocol):
 
             if IOStream.get_default() != iostream:
                 raise RuntimeError("Failed to set default IOStream")
-
             yield
         finally:
             IOStream._default_io_stream.reset(token)

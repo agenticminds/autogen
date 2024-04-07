@@ -12,11 +12,13 @@ from typing import Protocol
 
 from autogen.cache.cache import Cache
 from autogen.io.base import IOStream
+from autogen.io.messages import StreamMessageWrapper
 from autogen.oai.openai_utils import get_key, is_valid_api_key, OAI_PRICE1K
 from autogen.token_count_utils import count_token
 
 from autogen.runtime_logging import logging_enabled, log_chat_completion, log_new_client, log_new_wrapper
 from autogen.logger.logger_utils import get_current_ts
+import uuid
 
 TOOL_ENABLED = False
 try:
@@ -159,6 +161,11 @@ class OpenAIClient:
         """
         iostream = IOStream.get_default()
 
+        # request_id is used to correlate fragments and responses to a request in the event stream
+        request_id = str(uuid.uuid4())
+        # send the completion request event
+        iostream.output(OpenAIClient.CompletionRequest(request_id=request_id, params=params))
+
         completions: Completions = self._oai_client.chat.completions if "messages" in params else self._oai_client.completions  # type: ignore [attr-defined]
         # If streaming is enabled and has messages, then iterate over the chunks of the response.
         if params.get("stream", False) and "messages" in params:
@@ -220,6 +227,9 @@ class OpenAIClient:
                         # If content is present, print it to the terminal and update response variables
                         if content is not None:
                             iostream.print(content, end="", flush=True)
+                            if content != "":
+                                fragment = OpenAIClient.CompletionFragment(request_id=request_id, content=content)
+                                # iostream.output(fragment)
                             response_contents[choice.index] += content
                             completion_tokens += 1
                         else:
@@ -278,6 +288,7 @@ class OpenAIClient:
             params["stream"] = False
             response = completions.create(**params)
 
+        iostream.output(OpenAIClient.CompletionResponse(request_id=request_id, response=response))
         return response
 
     def cost(self, response: Union[ChatCompletion, Completion]) -> float:
@@ -305,6 +316,21 @@ class OpenAIClient:
             "cost": response.cost if hasattr(response, "cost") else 0,
             "model": response.model,
         }
+
+    @StreamMessageWrapper.register_message_type("llm.completion.fragment")
+    class CompletionFragment(BaseModel):
+        request_id: str
+        content: str
+
+    @StreamMessageWrapper.register_message_type("llm.completion.request")
+    class CompletionRequest(BaseModel):
+        request_id: str
+        params: Dict[str, Any]
+
+    @StreamMessageWrapper.register_message_type("llm.completion.response.openai")
+    class CompletionResponse(BaseModel):
+        request_id: str
+        response: ChatCompletion
 
 
 class OpenAIWrapper:

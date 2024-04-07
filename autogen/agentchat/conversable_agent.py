@@ -700,13 +700,13 @@ class ConversableAgent(LLMAgent):
         function_name: str
         function_arguments: str
 
-    @StreamMessageWrapper.register_message_type("agent.executing_function_message")
+    @StreamMessageWrapper.register_message_type("agent.executing_function")
     class ExecutingFunctionMessage(BaseModel):
         executor: str
         function_name: str
         function_args: Dict[str, Any]
 
-    @StreamMessageWrapper.register_message_type("agent.executed_function_message")
+    @StreamMessageWrapper.register_message_type("agent.executed_function")
     class ExecutedFunctionMessage(BaseModel):
         executor: str
         function_name: str
@@ -755,17 +755,27 @@ class ConversableAgent(LLMAgent):
 
             if "function_call" in message and message["function_call"]:
                 function_call = dict(message["function_call"])
-                func_print = (
-                    f"***** Suggested function Call: {function_call.get('name', '(No function name found)')} *****"
-                )
+                function_name = function_call.get("name", "(No function name found)")
+                function_arguments = function_call.get("arguments", "(No arguments found)")
+                func_print = f"***** Suggested function Call: {function_name} *****"
+
                 iostream.print(colored(func_print, "green"), flush=True)
                 iostream.print(
                     "Arguments: \n",
-                    function_call.get("arguments", "(No arguments found)"),
+                    function_arguments,
                     flush=True,
                     sep="",
                 )
                 iostream.print(colored("*" * len(func_print), "green"), flush=True)
+                iostream.output(
+                    self.SuggestToolCall(
+                        sender=sender.name,
+                        receiver=self.name,
+                        function_name=function_name,
+                        function_arguments=function_arguments,
+                    )
+                )
+
             if "tool_calls" in message and message["tool_calls"]:
                 for tool_call in message["tool_calls"]:
                     id = tool_call.get("id", "(No id found)")
@@ -1276,7 +1286,7 @@ class ConversableAgent(LLMAgent):
         else:
             self._consecutive_auto_reply_counter[sender] = 0
 
-    @StreamMessageWrapper.register_message_type("agent.clear_history_message")
+    @StreamMessageWrapper.register_message_type("agent.clear_history")
     class ClearHistoryMessage(BaseModel):
         sender: str
         recipient: str
