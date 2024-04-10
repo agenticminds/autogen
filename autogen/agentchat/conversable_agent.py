@@ -8,6 +8,7 @@ import re
 from collections import defaultdict
 from functools import partial
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Type, TypeVar, Union
+import uuid
 import warnings
 from openai import BadRequestError
 from pydantic import BaseModel
@@ -702,12 +703,14 @@ class ConversableAgent(LLMAgent):
 
     @StreamMessageWrapper.register_message_type("agent.executing_function")
     class ExecutingFunctionMessage(BaseModel):
+        id: str
         executor: str
         function_name: str
         function_args: Dict[str, Any]
 
     @StreamMessageWrapper.register_message_type("agent.executed_function")
     class ExecutedFunctionMessage(BaseModel):
+        id: str
         executor: str
         function_name: str
         function_args: Dict[str, Any]
@@ -2219,6 +2222,7 @@ class ConversableAgent(LLMAgent):
         func_name = func_call.get("name", "")
         func = self._function_map.get(func_name, None)
 
+        function_call_id = str(uuid.uuid4())
         is_exec_success = False
         if func is not None:
             # Extract arguments from a json-like string and put it into a dict.
@@ -2235,12 +2239,15 @@ class ConversableAgent(LLMAgent):
                     colored(f"\n>>>>>>>> EXECUTING FUNCTION {func_name}...", "magenta"),
                     flush=True,
                 )
-                executing_function_message = self.ExecutingFunctionMessage(
-                    executor=self.name,
-                    function_name=func_name,
-                    function_args=arguments,
+
+                iostream.output(
+                    self.ExecutingFunctionMessage(
+                        id=function_call_id,
+                        executor=self.name,
+                        function_name=func_name,
+                        function_args=arguments,
+                    )
                 )
-                iostream.output(executing_function_message)
                 try:
                     content = func(**arguments)
                     is_exec_success = True
@@ -2255,13 +2262,15 @@ class ConversableAgent(LLMAgent):
                 flush=True,
             )
 
-        executed_function_message = self.ExecutedFunctionMessage(
-            executor=self.name,
-            function_name=func_name,
-            function_args=arguments,
-            result=str(content),
+        iostream.output(
+            self.ExecutedFunctionMessage(
+                id=function_call_id,
+                executor=self.name,
+                function_name=func_name,
+                function_args=arguments,
+                result=str(content),
+            )
         )
-        iostream.output(executed_function_message)
 
         return is_exec_success, {
             "name": func_name,
