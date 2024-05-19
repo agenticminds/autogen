@@ -5,10 +5,16 @@ import inspect
 import json
 import logging
 import re
+import uuid
 import warnings
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Type, TypeVar, Union
-
+from .conversable_agent_messages import (
+    AgentMessage,
+    AgentSuggestToolCall,
+    AgentExecutingFunctionMessage,
+    AgentExecutedFunctionMessage,
+)
 from openai import BadRequestError
 
 from autogen.exception_utils import InvalidCarryOverType, SenderRequired
@@ -740,32 +746,52 @@ class ConversableAgent(LLMAgent):
                         self.llm_config and self.llm_config.get("allow_format_str_template", False),
                     )
                 iostream.print(content_str(content), flush=True)
+                if content != "":
+                    iostream.output(AgentMessage(sender=sender.name, receiver=self.name, message=content_str(content)))
             if "function_call" in message and message["function_call"]:
                 function_call = dict(message["function_call"])
-                func_print = (
-                    f"***** Suggested function call: {function_call.get('name', '(No function name found)')} *****"
-                )
+                function_name = function_call.get("name", "(No function name found)")
+                function_arguments = function_call.get("arguments", "(No arguments found)")
+                func_print = f"***** Suggested function call: {function_name} *****"
                 iostream.print(colored(func_print, "green"), flush=True)
                 iostream.print(
                     "Arguments: \n",
-                    function_call.get("arguments", "(No arguments found)"),
+                    function_arguments,
                     flush=True,
                     sep="",
                 )
                 iostream.print(colored("*" * len(func_print), "green"), flush=True)
+                iostream.output(
+                    AgentSuggestToolCall(
+                        sender=sender.name,
+                        receiver=self.name,
+                        function_name=function_name,
+                        function_arguments=function_arguments,
+                    )
+                )
             if "tool_calls" in message and message["tool_calls"]:
                 for tool_call in message["tool_calls"]:
                     id = tool_call.get("id", "No tool call id found")
                     function_call = dict(tool_call.get("function", {}))
-                    func_print = f"***** Suggested tool call ({id}): {function_call.get('name', '(No function name found)')} *****"
+                    function_name = function_call.get("name", "(No function name found)")
+                    function_arguments = function_call.get("arguments", "(No arguments found)")
+                    func_print = f"***** Suggested tool call ({id}): {function_name} *****"
                     iostream.print(colored(func_print, "green"), flush=True)
                     iostream.print(
                         "Arguments: \n",
-                        function_call.get("arguments", "(No arguments found)"),
+                        function_arguments,
                         flush=True,
                         sep="",
                     )
                     iostream.print(colored("*" * len(func_print), "green"), flush=True)
+                    iostream.output(
+                        AgentSuggestToolCall(
+                            sender=sender.name,
+                            receiver=self.name,
+                            function_name=function_name,
+                            function_arguments=function_arguments,
+                        )
+                    )
 
         iostream.print("\n", "-" * 80, flush=True, sep="")
 
@@ -2227,6 +2253,7 @@ class ConversableAgent(LLMAgent):
         func_name = func_call.get("name", "")
         func = self._function_map.get(func_name, None)
 
+        function_call_id = str(uuid.uuid4())
         is_exec_success = False
         if func is not None:
             # Extract arguments from a json-like string and put it into a dict.
@@ -2243,11 +2270,30 @@ class ConversableAgent(LLMAgent):
                     colored(f"\n>>>>>>>> EXECUTING FUNCTION {func_name}...", "magenta"),
                     flush=True,
                 )
+                iostream.output(
+                    AgentExecutingFunctionMessage(
+                        id=function_call_id,
+                        executor=self.name,
+                        function_name=func_name,
+                        function_args=arguments,
+                    )
+                )
                 try:
                     content = func(**arguments)
                     is_exec_success = True
                 except Exception as e:
                     content = f"Error: {e}"
+
+                # emit a message containing the outcome of the function
+                iostream.output(
+                    AgentExecutedFunctionMessage(
+                        id=function_call_id,
+                        executor=self.name,
+                        function_name=func_name,
+                        function_args=arguments if arguments is not None else {},
+                        result=str(content),
+                    )
+                )
         else:
             content = f"Error: Function {func_name} not found."
 

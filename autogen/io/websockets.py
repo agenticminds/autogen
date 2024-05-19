@@ -3,10 +3,12 @@ import ssl
 import threading
 from contextlib import contextmanager
 from functools import partial
+from pydantic import BaseModel
 from time import sleep
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Iterator, Optional, Protocol, Union
 
 from .base import IOStream
+from .messages import StreamMessageWrapper
 
 # Check if the websockets module is available
 try:
@@ -75,6 +77,9 @@ class WebSocketServer(Protocol):
 
 class IOWebsockets(IOStream):
     """A websocket input/output stream."""
+
+    structured_output = False
+    """bool: Indicates whether the output should be structured."""
 
     def __init__(self, websocket: ServerConnection) -> None:
         """Initialize the websocket input/output stream.
@@ -185,8 +190,19 @@ class IOWebsockets(IOStream):
             end (str, optional): The end of the output. Defaults to "\n".
             flush (bool, optional): Whether to flush the output. Defaults to False.
         """
-        xs = sep.join(map(str, objects)) + end
-        self._websocket.send(xs)
+        if not IOWebsockets.structured_output:
+            xs = sep.join(map(str, objects)) + end
+            self._websocket.send(xs)
+
+    def output(self, msg: BaseModel) -> None:
+        """Output a JSON-encoded message to the output stream.
+
+        Args:
+            msg (BaseModel): The message to output.
+        """
+        if IOWebsockets.structured_output:
+            wrapper_msg = StreamMessageWrapper.create(msg)
+            self._websocket.send(wrapper_msg.model_dump_json())
 
     def input(self, prompt: str = "", *, password: bool = False) -> str:
         """Read a line from the input stream.

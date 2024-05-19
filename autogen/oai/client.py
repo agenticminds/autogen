@@ -37,6 +37,7 @@ else:
     )
     from openai.types.completion import Completion
     from openai.types.completion_usage import CompletionUsage
+    from .openai_messages import OpenAICompletionFragment, OpenAICompletionRequest, OpenAICompletionResponse
 
     if openai.__version__ >= "1.1.0":
         TOOL_ENABLED = True
@@ -165,6 +166,11 @@ class OpenAIClient:
         """
         iostream = IOStream.get_default()
 
+        # request_id is used to correlate fragments and responses to a request in the event stream
+        request_id = str(uuid.uuid4())
+        # send the completion request event
+        iostream.output(OpenAICompletionRequest(request_id=request_id, params=params))
+
         completions: Completions = self._oai_client.chat.completions if "messages" in params else self._oai_client.completions  # type: ignore [attr-defined]
         # If streaming is enabled and has messages, then iterate over the chunks of the response.
         if params.get("stream", False) and "messages" in params:
@@ -226,6 +232,9 @@ class OpenAIClient:
                         # If content is present, print it to the terminal and update response variables
                         if content is not None:
                             iostream.print(content, end="", flush=True)
+                            if content != "":
+                                fragment = OpenAICompletionFragment(request_id=request_id, content=content)
+                                iostream.output(fragment)
                             response_contents[choice.index] += content
                             completion_tokens += 1
                         else:
@@ -284,6 +293,7 @@ class OpenAIClient:
             params["stream"] = False
             response = completions.create(**params)
 
+        iostream.output(OpenAICompletionResponse(request_id=request_id, response=response))
         return response
 
     def cost(self, response: Union[ChatCompletion, Completion]) -> float:
