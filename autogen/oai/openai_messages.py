@@ -26,7 +26,7 @@ class OpenAICompletionRequest(BaseModel):
     """The parameters of the completion request."""
 
 
-@StreamMessageWrapper.register_message_type("openai.completion.response.openai")
+@StreamMessageWrapper.register_message_type("openai.completion.response")
 class OpenAICompletionResponse(BaseModel):
     """Represents a response from OpenAI's language model for a completion request."""
 
